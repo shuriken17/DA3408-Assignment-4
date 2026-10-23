@@ -1,0 +1,5 @@
+streamlit>=1.50
+transformers>=4.46
+pillow
+prometheus-client
+psutil

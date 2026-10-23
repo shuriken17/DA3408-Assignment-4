@@ -1,0 +1,74 @@
+groups:
+  - name: recording_rules
+    rules:
+      # prompt: PromQL for total CPU utilisation of the machine as a 0 to 1 ratio, from node_cpu_seconds_total
+      - record: node:cpu_utilisation:ratio
+        expr: 1 - avg(rate(node_cpu_seconds_total{mode="idle"}[1m]))
+
+      # prompt: PromQL for memory utilisation as a 0 to 1 ratio from node_exporter MemAvailable and MemTotal
+      - record: node:memory_utilisation:ratio
+        expr: 1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes
+
+      # prompt: PromQL for successfully captioned images per minute split by mode, from a counter
+      - record: caption:images_per_minute:rate1m
+        expr: sum by (mode) (rate(caption_images_processed_total{status="success"}[1m])) * 60
+
+      # prompt: PromQL for the 95th percentile inference time per mode from a histogram
+      - record: caption:inference_seconds:p95
+        expr: histogram_quantile(0.95, sum by (le, mode) (rate(caption_inference_seconds_bucket[1m])))
+
+  - name: alerts
+    rules:
+      - alert: CaptionAppDown
+        expr: up{job="caption_app"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Captioning app is down"
+          description: "Prometheus could not scrape localhost:18000 for 30 seconds."
+
+      - alert: NodeExporterDown
+        expr: up{job="node"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "node_exporter is down"
+          description: "System metrics have been missing for 30 seconds."
+
+      - alert: HighCPUUtilisation
+        expr: node:cpu_utilisation:ratio > 0.9
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU above 90% for 1 minute"
+          description: "CPU utilisation is {{ $value | humanizePercentage }}."
+
+      - alert: HighMemoryUtilisation
+        expr: node:memory_utilisation:ratio > 0.9
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Memory above 90% for 1 minute"
+          description: "Memory utilisation is {{ $value | humanizePercentage }}."
+
+      - alert: SlowInference
+        expr: caption:inference_seconds:p95 > 8
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow captioning ({{ $labels.mode }})"
+          description: "95% of images finish within {{ $value | humanizeDuration }}, the limit is 8 s."
+
+      # prompt: PromQL alert condition that fires when more than 5 errors were counted in caption_errors_total in the last 5 minutes
+      - alert: CaptionErrors
+        expr: sum(increase(caption_errors_total[5m])) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 5 captioning errors in 5 minutes"
+          description: "{{ $value | humanize }} errors in the last 5 minutes."
